@@ -4,10 +4,10 @@ from psycopg2.extras import RealDictCursor
 import urllib.parse
 import datetime
 import json
-import pandas as pd
+import calendar
 
 # ====================================================================
-# 💾 CẤU HÌNH TRANG VÀ CSS CHIA MÀU TASK (GIỐNG BẢN GỐC V15)
+# 💾 CẤU HÌNH TRANG & CSS PHỤC HỒI GIAO DIỆN HÀNG NGANG (APP GỐC V15)
 # ====================================================================
 st.set_page_config(
     page_title="HLC Workstation Team Project Hub",
@@ -16,14 +16,54 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Nhúng CSS tùy biến để ép màu và bo góc thẻ Task giống hệt CustomTkinter
+# Ép CSS hàng ngang, chấm màu, nhãn thời gian và khung Group Header màu xanh giống hệt ảnh anh chụp
 st.markdown("""
 <style>
-    .task-card { padding: 12px; border-radius: 8px; margin-bottom: 10px; border-left: 6px solid #ccc; background-color: #1e293b; }
-    .task-overdue { border-left-color: #ef4444 !important; background-color: #2d1a1a !important; } /* Đỏ: Trễ hạn / Khẩn */
-    .task-doing { border-left-color: #f59e0b !important; background-color: #2d2414 !important; }   /* Vàng: Đang làm */
-    .task-done { border-left-color: #10b981 !important; background-color: #142d20 !important; }    /* Xanh: Hoàn thành */
-    .task-title { font-weight: bold; font-size: 15px; color: #f8fafc; }
+    /* Tổng thể Task Row hàng ngang */
+    .hlc-task-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 16px;
+        background-color: #161b26;
+        border-bottom: 1px solid #1f2937;
+        margin-bottom: 4px;
+        border-radius: 4px;
+    }
+    .hlc-left-part { display: flex; align-items: center; gap: 10px; }
+    .hlc-right-part { display: flex; align-items: center; gap: 20px; font-size: 13px; color: #64748b; }
+    
+    /* Chấm màu trạng thái */
+    .dot { font-size: 16px; margin-right: 4px; }
+    .dot-todo { color: #64748b; }
+    .dot-doing { color: #f59e0b; }
+    .dot-done { color: #10b981; }
+    
+    /* Chữ tiêu đề Task */
+    .task-text-normal { font-weight: 600; color: #eab308; font-size: 14px; } /* Mặc định vàng cam nhẹ giống ảnh */
+    .task-text-done { font-weight: 500; color: #4b5563; text-decoration: line-through; font-size: 14px; }
+    
+    /* Khung Group Header theo Ngày (Màu xanh dương như ảnh gốc) */
+    .hlc-date-header {
+        background-color: #1e3a8a;
+        border: 1px solid #2563eb;
+        padding: 8px 16px;
+        border-radius: 6px 6px 0 0;
+        margin-top: 15px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: #38bdf8;
+        font-weight: bold;
+    }
+    .hlc-date-body {
+        border: 1px solid #2563eb;
+        border-top: none;
+        background-color: #0f172a;
+        padding: 6px;
+        border-radius: 0 0 6px 6px;
+        margin-bottom: 15px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -33,7 +73,6 @@ if "username" not in st.session_state: st.session_state.username = None
 if "role" not in st.session_state: st.session_state.role = None
 if "uid" not in st.session_state: st.session_state.uid = None
 if "selected_date" not in st.session_state: st.session_state.selected_date = datetime.date.today()
-if "current_page" not in st.session_state: st.session_state.current_page = "Dashboard"
 if "editing_task_id" not in st.session_state: st.session_state.editing_task_id = None
 if "search_kw" not in st.session_state: st.session_state.search_kw = ""
 
@@ -82,7 +121,7 @@ def strip_tz(dt):
     return dt
 
 # ====================================================================
-# 🔒 MÀN HÌNH ĐĂNG NHẬP
+# 🔒 MÀN HÌNH XÁC THỰC LÀM VÀ PHÂN QUYỀN USER LIST
 # ====================================================================
 if not st.session_state.authenticated:
     st.markdown("<br><br><h2 style='text-align: center; color: #38bdf8;'>🔒 HLC SYSTEM CLOUD AUTHENTICATION</h2>", unsafe_allow_html=True)
@@ -90,7 +129,6 @@ if not st.session_state.authenticated:
         username = st.text_input("Tên đăng nhập (Username)").strip()
         password = st.text_input("Mật khẩu (Password)", type="password").strip()
         submit = st.form_submit_button("ĐĂNG NHẬP HỆ THỐNG", use_container_width=True)
-        
         if submit:
             user = run_query("SELECT username, role, uid FROM hlc_users WHERE username = %s AND password = %s;", (username, password), fetch="one")
             if user:
@@ -98,42 +136,26 @@ if not st.session_state.authenticated:
                 st.session_state.username = user['username']
                 st.session_state.role = user['role']
                 st.session_state.uid = str(user['uid'])
-                st.toast(f"🎉 Chào mừng {user['username']} quay trở lại hệ thống!", icon="🚀")
                 st.rerun()
-            else:
-                st.error("❌ Sai tài khoản hoặc mật khẩu hệ thống!")
+            else: st.error("❌ Sai thông tin xác thực!")
     st.stop()
 
-# Đọc danh sách nhân sự từ Cloud
 users_db = run_query("SELECT username, uid, role FROM hlc_users ORDER BY username ASC;") or []
 all_usernames = [u['username'] for u in users_db]
 user_uid_map = {u['username']: str(u['uid']) for u in users_db}
 user_role_map = {u['username']: u['role'] for u in users_db}
 assignable_users = all_usernames if st.session_state.role == "Admin" else [un for un in all_usernames if user_role_map.get(un) != "Admin"]
 
-# Pull toàn bộ danh sách task phục vụ hiển thị lịch và kiểm tra cảnh báo trễ hạn
+# Pull dữ liệu toàn cục phục vụ kết xuất giao diện
 all_tasks = run_query("SELECT * FROM team_tasks ORDER BY is_closed ASC, deadline_date ASC;") or []
 
-# 🔔 TÍNH NĂNG THÔNG BÁO WEB CHẠY TỰ ĐỘNG
-today_dt = datetime.datetime.now()
-overdue_count = 0
-for t in all_tasks:
-    if not t['is_closed'] and t['status'] != 'Done' and t['deadline_date']:
-        dl_naive = strip_tz(t['deadline_date'])
-        if dl_naive < today_dt:
-            overdue_count += 1
-
-if overdue_count > 0:
-    st.toast(f"⚠️ CẢNH BÁO: Hiện có {overdue_count} đầu việc trên hệ thống đã QUÁ HẠN CHÓT!", icon="🚨")
-
 # ====================================================================
-# ✏️ POP-UP DIALOG CHỈNH SỬA CHI TIẾT VÀ CHECKLIST
+# ✏️ POP-UP CHỈNH SỬA CHI TIẾT ĐẦU VIỆC CHUYÊN SÂU
 # ====================================================================
 if st.session_state.editing_task_id is not None:
     task = run_query("SELECT * FROM team_tasks WHERE id = %s;", (st.session_state.editing_task_id,), fetch="one")
     if task:
-        st.markdown(f"### ✏️ Chi Tiết & Chỉnh Sửa Đầu Việc: `{task['task_name']}`")
-        
+        st.markdown(f"### ✏️ Sửa Đầu Việc: `{task['task_name']}`")
         is_owner = st.session_state.role == "Admin" or st.session_state.username.lower() in [task['created_by'].lower(), task['assignee'].lower()]
         sub_tasks = safe_json_load(task['sub_tasks'])
         tagged_users = safe_json_load(task['tagged_users'])
@@ -150,48 +172,39 @@ if st.session_state.editing_task_id is not None:
                 d_loc = strip_tz(task['deadline_date']) or datetime.datetime.now()
                 edit_dl_date = st.date_input("Ngày hạn chót", value=d_loc.date(), disabled=not is_owner or task['is_closed'])
                 edit_dl_time = st.time_input("Giờ hạn chót", value=d_loc.time(), disabled=not is_owner or task['is_closed'])
+                
+            edit_details = st.text_area("Mô tả chi tiết", value=task['task_details'] or "", disabled=not is_owner or task['is_closed'])
+            edit_docs = st.text_area("💬 Ghi chú (Comment Note)", value=task['task_docs'] or "")
+            edit_tags = st.multiselect("🏷️ Thành viên hỗ trợ", [u for u in assignable_users if u != edit_assignee], default=[t for t in tagged_users if t in assignable_users], disabled=not is_owner or task['is_closed'])
             
-            edit_details = st.text_area("Mô tả chi tiết công việc", value=task['task_details'] or "", disabled=not is_owner or task['is_closed'])
-            edit_docs = st.text_area("💬 Tài liệu Docs & Ghi chú (Comment Note)", value=task['task_docs'] or "")
-            edit_tags = st.multiselect("🏷️ Thành viên hỗ trợ (Tagged Users)", [u for u in assignable_users if u != edit_assignee], default=[t for t in tagged_users if t in assignable_users], disabled=not is_owner or task['is_closed'])
-            
-            # --- KHU VỰC SUB-TASKS: HIỂN THỊ VÀ THÊM HÀNG LOẠT ---
-            st.write("📋 **Các bước thực hiện hiện tại:**")
+            st.write("📋 **Các bước thực hiện:**")
             updated_sub_tasks = []
             for idx, st_item in enumerate(sub_tasks):
                 cb_val = st.checkbox(st_item.get('name', ''), value=st_item.get('done', False), key=f"sub_cb_{idx}")
                 updated_sub_tasks.append({"name": st_item.get('name', ''), "done": cb_val})
-            
-            st.write("➕ **Thêm hàng loạt bước thực hiện con mới (Mỗi bước viết trên 1 dòng):**")
-            bulk_sub_input = st.text_area("Ví dụ:\nBước 1: Khảo sát hiện trạng\nBước 2: Lập hồ sơ thiết kế cơ sở", height=100, placeholder="Nhập danh sách bước tại đây...")
+                
+            bulk_sub_input = st.text_area("➕ Thêm hàng loạt bước thực hiện (Mỗi bước 1 dòng):", height=80)
             
             col_save, col_close_t, col_cancel = st.columns([2, 2, 1])
             with col_save: save_btn = st.form_submit_button("💾 LƯU THAY ĐỔI LÊN CLOUD", use_container_width=True)
-            with col_close_t: close_btn = st.form_submit_button("🔒 ĐÓNG VĨNH VIỄN TASK", use_container_width=True) if is_owner and not task['is_closed'] else False
-            with col_cancel: cancel_btn = st.form_submit_button("Đóng", use_container_width=True)
-                
+            with col_close_t: close_btn = st.form_submit_button("🔒 ĐÓNG TASK", use_container_width=True) if is_owner and not task['is_closed'] else False
+            with col_cancel: cancel_btn = st.form_submit_button("Đóng cửa sổ", use_container_width=True)
+            
             if save_btn:
                 if bulk_sub_input.strip() and is_owner and not task['is_closed']:
-                    lines = [line.strip() for line in bulk_sub_input.split('\n') if line.strip()]
-                    for line in lines:
+                    for line in [l.strip() for l in bulk_sub_input.split('\n') if l.strip()]:
                         updated_sub_tasks.append({"name": line, "done": False})
-                
                 full_dl = datetime.datetime.combine(edit_dl_date, edit_dl_time)
                 t_uids = [user_uid_map[u] for u in edit_tags if u in user_uid_map]
-                
                 if is_owner and not task['is_closed']:
                     run_query("""
-                        UPDATE team_tasks 
-                        SET task_name=%s, assignee=%s, assignee_uid=%s::uuid, start_date=%s, deadline_date=%s, task_details=%s, task_docs=%s, sub_tasks=%s::jsonb, tagged_users=%s::jsonb, tagged_uids=%s::jsonb
+                        UPDATE team_tasks SET task_name=%s, assignee=%s, assignee_uid=%s::uuid, start_date=%s, deadline_date=%s, task_details=%s, task_docs=%s, sub_tasks=%s::jsonb, tagged_users=%s::jsonb, tagged_uids=%s::jsonb
                         WHERE id=%s;
                     """, (edit_name, edit_assignee, user_uid_map.get(edit_assignee), edit_start, full_dl, edit_details, edit_docs, json.dumps(updated_sub_tasks), json.dumps(edit_tags), json.dumps(t_uids), task['id']), commit=True)
                 else:
                     run_query("UPDATE team_tasks SET task_docs=%s WHERE id=%s;", (edit_docs, task['id']), commit=True)
-                
-                st.toast("✅ Đã cập nhật toàn bộ thông tin công việc lên Cloud thành công!", icon="⚡")
                 st.session_state.editing_task_id = None
                 st.rerun()
-                
             if close_btn:
                 run_query("UPDATE team_tasks SET is_closed=TRUE, status='Done' WHERE id=%s;", (task['id'],), commit=True)
                 st.session_state.editing_task_id = None
@@ -202,15 +215,11 @@ if st.session_state.editing_task_id is not None:
     st.stop()
 
 # ====================================================================
-# INTERFACE BANNER CHÍNH & SEARCH BỘ LỌC
+# BANNER ĐẦU TRANG & SEARCH BAR BỘ LỌC
 # ====================================================================
-col_hub, col_p1, col_p2, col_p3 = st.columns([5, 2, 2, 2])
+col_hub, col_p2, col_p3 = st.columns([7, 2, 2])
 with col_hub:
     st.markdown(f"<h2 style='color: #0ea5e9; margin:0;'>📊 HLC PRODUCTION HUB ➔ {st.session_state.username.upper()}</h2>", unsafe_allow_html=True)
-with col_p1:
-    if st.session_state.role in ("Admin", "Manager") and st.button("👥 QUẢN LÝ NHÂN SỰ", use_container_width=True):
-        st.session_state.current_page = "HR" if st.session_state.current_page == "Dashboard" else "Dashboard"
-        st.rerun()
 with col_p2:
     if st.button("🔄 ĐỒNG BỘ CLOUD", use_container_width=True): st.rerun()
 with col_p3:
@@ -220,35 +229,32 @@ with col_p3:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Bộ lọc tìm kiếm nhanh đầu trang
 col_search, col_sort, col_view = st.columns([5, 2, 2])
 with col_search:
-    st.session_state.search_kw = st.text_input("🔍 Nhập tên việc hoặc tên nhân sự để lọc danh sách...", value=st.session_state.search_kw)
+    st.session_state.search_kw = st.text_input("🔍 Nhập tên Task hoặc nhân sự để tìm kiếm...", value=st.session_state.search_kw)
 with col_sort:
-    sort_mode = st.selectbox("Sắp xếp", ["Mặc định", "Deadline gần nhất", "Theo nhân sự phụ trách"])
+    sort_mode = st.selectbox("Sắp xếp", ["Mặc định", "Theo nhân sự"])
 with col_view:
-    view_mode = st.selectbox("Chế độ xem", ["Kanban (Ngày)", "Kanban (Tuần)", "Kanban (Tháng)", "List View"])
+    view_mode = st.selectbox("Xem theo khoảng thời gian", ["Ngày", "Tuần", "Tháng"])
 
+# Logic Lọc Tìm Kiếm Kịp Thời
 if st.session_state.search_kw.strip():
     kw = st.session_state.search_kw.lower()
     all_tasks = [t for t in all_tasks if kw in str(t['task_name']).lower() or kw in str(t['assignee']).lower()]
 
-if sort_mode == "Deadline gần nhất":
-    all_tasks = sorted(all_tasks, key=lambda x: x['deadline_date'] or datetime.datetime.max)
-elif sort_mode == "Theo nhân sự phụ trách":
+if sort_mode == "Theo nhân sự":
     all_tasks = sorted(all_tasks, key=lambda x: (x['assignee'] or '').lower())
 
 st.divider()
 
 # ====================================================================
-# LAYOUT CHIA ĐÔI MÀN HÌNH CHÍNH (TRÁI: LỊCH THÁNG & TẠO VIỆC | PHẢI: BOARD)
+# LAYOUT HAI PHÂN KHÚC CHÍNH (TRÁI: CONTROL | PHẢI: BẢNG VIEW DÒNG GỐC)
 # ====================================================================
 col_panel_left, col_panel_right = st.columns([3, 7])
 
-# --- 1️⃣ BÊN TRÁI: BẢNG LỊCH HIỂN THỊ FULL TRỰC QUAN & FORM KHỞI TẠO ---
 with col_panel_left:
     st.markdown("#### 📅 LỊCH TRỰC QUAN")
-    cal_curr = st.date_input("Chọn mốc thời gian tiêu điểm", value=st.session_state.selected_date, label_visibility="visible")
+    cal_curr = st.date_input("Chọn mốc ngày tiêu điểm", value=st.session_state.selected_date, label_visibility="collapsed")
     if cal_curr != st.session_state.selected_date:
         st.session_state.selected_date = cal_curr
         st.rerun()
@@ -257,156 +263,104 @@ with col_panel_left:
     with st.form("add_task_form_main", clear_on_submit=True):
         c_name = st.text_input("Tên đầu việc (Task Name)")
         c_assignee = st.selectbox("Nhân sự phụ trách", assignable_users, index=assignable_users.index(st.session_state.username) if st.session_state.username in assignable_users else 0, disabled=(st.session_state.role == "Member"))
-        
         c_start = st.date_input("📆 Ngày bắt đầu", value=st.session_state.selected_date)
         c_dl_date = st.date_input("Ngày hạn chót (Deadline)", value=st.session_state.selected_date + datetime.timedelta(days=1))
         c_dl_time = st.time_input("Giờ hạn chót", datetime.time(18, 00))
-        
         c_details = st.text_area("Mô tả chi tiết công việc")
-        st.write("📋 **Nhập hàng loạt bước con con ban đầu (Mỗi bước 1 dòng):**")
-        c_bulk_sub = st.text_area("Danh sách bước con...", key="create_bulk_sub", height=80)
+        c_bulk_sub = st.text_area("Nhập hàng loạt bước con (Mỗi việc 1 dòng)...", height=80)
         
         submit_new = st.form_submit_button("🚀 ĐẨY TASK LÊN ĐÁM MÂY HLC", use_container_width=True)
-        if submit_new:
-            if not c_name.strip():
-                st.error("Không được bỏ trống tên đầu việc!")
-            else:
-                initial_subs = []
-                if c_bulk_sub.strip():
-                    initial_subs = [{"name": line.strip(), "done": False} for line in c_bulk_sub.split('\n') if line.strip()]
-                    
-                full_dl_new = datetime.datetime.combine(c_dl_date, c_dl_time)
-                run_query("""
-                    INSERT INTO team_tasks (task_name, assignee, assignee_uid, start_date, deadline_date, status, task_details, task_docs, created_by, is_closed, sub_tasks, tagged_users)
-                    VALUES (%s, %s, %s::uuid, %s, %s, 'To-do', %s, '', %s, FALSE, %s::jsonb, '[]'::jsonb);
-                """, (c_name, c_assignee, user_uid_map.get(c_assignee), c_start, full_dl_new, c_details, st.session_state.username, json.dumps(initial_subs)), commit=True)
-                st.toast("🚀 Đã đẩy tác vụ mới lên Cloud thành công!", icon="🎉")
-                st.rerun()
+        if submit_new and c_name.strip():
+            initial_subs = [{"name": line.strip(), "done": False} for line in c_bulk_sub.split('\n') if line.strip()]
+            full_dl_new = datetime.datetime.combine(c_dl_date, c_dl_time)
+            run_query("""
+                INSERT INTO team_tasks (task_name, assignee, assignee_uid, start_date, deadline_date, status, task_details, task_docs, created_by, is_closed, sub_tasks, tagged_users)
+                VALUES (%s, %s, %s::uuid, %s, %s, 'To-do', %s, '', %s, FALSE, %s::jsonb, '[]'::jsonb);
+            """, (c_name, c_assignee, user_uid_map.get(c_assignee), c_start, full_dl_new, c_details, st.session_state.username, json.dumps(initial_subs)), commit=True)
+            st.toast("🚀 Đã đẩy tác vụ mới thành công!", icon="🎉")
+            st.rerun()
 
-# --- 2️⃣ BÊN PHẢI: KANBAN BOARD ĐA CHẾ ĐỘ XEM (NGÀY / TUẦN / THÁNG) ---
+# --- 2️⃣ BÊN PHẢI: HIỂN THỊ DANH SÁCH DÒNG NGANG THEO ĐÚNG MẪU ẢNH ---
 with col_panel_right:
     anchor_date = st.session_state.selected_date
     
-    # Định cấu hình khoảng thời gian lọc dựa theo Chế độ xem chọn ở dropdown giống bản v15
-    if "Kanban (Ngày)" in view_mode:
-        start_bound = anchor_date
-        end_bound = anchor_date
-        scope_title = f"Tiêu điểm ngày: `{anchor_date.strftime('%d/%m/%Y')}`"
-    elif "Kanban (Tuần)" in view_mode:
-        start_bound = anchor_date - datetime.timedelta(days=anchor_date.weekday())
-        end_bound = start_bound + datetime.timedelta(days=6)
-        scope_title = f"Tiêu điểm tuần: `{start_bound.strftime('%d/%m')} ➔ {end_bound.strftime('%d/%m/%Y')}`"
-    elif "Kanban (Tháng)" in view_mode:
-        start_bound = datetime.date(anchor_date.year, anchor_date.month, 1)
+    # Xác định danh sách các ngày cần hiển thị dựa theo chế độ xem (Ngày / Tuần / Tháng)
+    days_to_render = []
+    if view_mode == "Ngày":
+        days_to_render = [anchor_date]
+    elif view_mode == "Tuần":
+        start_week = anchor_date - datetime.timedelta(days=anchor_date.weekday())
+        days_to_render = [start_week + datetime.timedelta(days=i) for i in range(7)]
+    elif view_mode == "Tháng":
         _, last_day = calendar.monthrange(anchor_date.year, anchor_date.month)
-        end_bound = datetime.date(anchor_date.year, anchor_date.month, last_day)
-        scope_title = f"Tiêu điểm tháng: `{anchor_date.strftime('%m/%Y')}`"
-    else: # List View
-        start_bound = anchor_date
-        end_bound = anchor_date
-        scope_title = f"Danh sách ngày: `{anchor_date.strftime('%d/%m/%Y')}`"
+        days_to_render = [datetime.date(anchor_date.year, anchor_date.month, day_num) for day_num in range(1, last_day + 1)]
 
-    st.markdown(f"#### ⚡ BOARD KANBAN CHIA THEO MÀU SẮC — {scope_title}")
+    st.markdown(f"#### ⏱️ DANH SÁCH CÔNG VIỆC — CHẾ ĐỘ XEM THEO THỜI GIAN")
 
-    # Hàm lọc giao thoa khoảng thời gian chính xác
-    def is_task_in_bounds(t, s_b, e_b):
+    # Hàm kiểm tra task có active trúng ngày đó không
+    def is_task_active_on_day(t, d):
         try:
-            t_start = t['start_date'] if isinstance(t['start_date'], datetime.date) else t['created_at'].date()
-            t_end = t['deadline_date'].date() if isinstance(t['deadline_date'], datetime.datetime) else t['deadline_date']
-            return not (t_end < s_b or t_start > e_b)
+            st_d = t['start_date'] if isinstance(t['start_date'], datetime.date) else t['created_at'].date()
+            dl_d = t['deadline_date'].date() if isinstance(t['deadline_date'], datetime.datetime) else t['deadline_date']
+            return st_d <= d <= dl_d
         except: return False
 
-    filtered_scope_tasks = [t for t in all_tasks if is_task_in_bounds(t, start_bound, end_bound)]
-
-    if not filtered_scope_tasks:
-        st.info("☘️ Hiện không có đầu việc nào được phân bổ trong khoảng thời gian này.")
-    else:
-        if "Kanban" in view_mode:
-            col_todo, col_doing, col_done = st.columns(3)
+    # Vẽ vòng lặp qua từng ngày (Date Group Headers màu xanh) giống ảnh thiết kế gốc
+    has_any_task = False
+    for target_day in days_to_render:
+        day_tasks = [t for t in all_tasks if is_task_active_on_day(t, target_day)]
+        if not day_tasks:
+            continue
             
-            with col_todo:
-                st.markdown("<h5 style='color: #94a3b8; text-align:center;'>📌 CẦN LÀM</h5>", unsafe_allow_html=True)
-                for t in [x for x in filtered_scope_tasks if x['status'] == 'To-do' and not x['is_closed']]:
-                    dl_naive = strip_tz(t['deadline_date'])
-                    card_class = "task-card task-overdue" if (dl_naive and dl_naive < today_dt) else "task-card"
-                    
-                    st.markdown(f"""
-                    <div class="{card_class}">
-                        <div class="task-title">{t['task_name']}</div>
-                        <span style='font-size:12px; color:#94a3b8;'>👤 {t['assignee']}</span><br>
-                        <span style='font-size:12px; color:#f87171;'>⏱️ Hạn: {dl_naive.strftime('%d/%m %H:%M') if dl_naive else '—'}</span>
+        has_any_task = True
+        day_str = target_day.strftime('%A %d/%m/%Y').replace("Monday","Thứ 2").replace("Tuesday","Thứ 3").replace("Wednesday","Thứ 4").replace("Thursday","Thứ 5").replace("Friday","Thứ 6").replace("Saturday","Thứ 7").replace("Sunday","Chủ Nhật")
+        
+        # Tạo Group Header màu xanh dương xịn mịn kèm badge đếm số lượng task ở góc phải
+        st.markdown(f"""
+        <div class="hlc-date-header">
+            <span>⭐ {day_str.upper()}</span>
+            <span style="font-size: 12px; background: #0b0f19; padding: 2px 8px; border-radius: 10px;">{len(day_tasks)} TASK</span>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Render các Task Row hàng ngang nằm bên trong khung border xanh
+        with st.markdown('<div class="hlc-date-body">', unsafe_allow_html=True):
+            for t in day_tasks:
+                # Phân định dấu chấm trạng thái màu sắc
+                if t['is_closed']: dot_html = '<span class="dot dot-todo">●</span>'
+                elif t['status'] == 'Done': dot_html = '<span class="dot dot-done">●</span>'
+                elif t['status'] == 'Doing': dot_html = '<span class="dot dot-doing">●</span>'
+                else: dot_html = '<span class="dot dot-todo">●</span>'
+                
+                # Kiểu chữ
+                text_class = "task-text-done" if (t['is_closed'] or t['status'] == 'Done') else "task-text-normal"
+                
+                # Chuỗi hiển thị deadline giờ giấc
+                dl_naive = strip_tz(t['deadline_date'])
+                time_str = dl_naive.strftime('%H:%M') if dl_naive else "00:00"
+                assignee_str = t['assignee'] or "chưa gán"
+                
+                # Xuất luồng HTML trọn gói cho 1 dòng việc nằm ngang
+                st.markdown(f"""
+                <div class="hlc-task-row">
+                    <div class="hlc-left-part">
+                        {dot_html}
+                        <span class="{text_class}">{t['task_name']}</span>
                     </div>
-                    """, unsafe_allow_html=True)
-                    
-                    col_btn1, col_btn2 = st.columns(2)
-                    with col_btn1:
-                        if st.button("✏️ CHI TIẾT", key=f"td_ed_{t['id']}", use_container_width=True):
-                            st.session_state.editing_task_id = t['id']
-                            st.rerun()
-                    with col_btn2:
-                        if st.button("LÀM ➔", key=f"td_mv_{t['id']}", use_container_width=True):
-                            run_query("UPDATE team_tasks SET status='Doing' WHERE id=%s", (t['id'],), commit=True)
-                            st.rerun()
-
-            with col_doing:
-                st.markdown("<h5 style='color: #f59e0b; text-align:center;'>⚡ ĐANG LÀM</h5>", unsafe_allow_html=True)
-                for t in [x for x in filtered_scope_tasks if x['status'] == 'Doing' and not x['is_closed']]:
-                    dl_naive = strip_tz(t['deadline_date'])
-                    card_class = "task-card task-overdue" if (dl_naive and dl_naive < today_dt) else "task-card task-doing"
-                    
-                    st.markdown(f"""
-                    <div class="{card_class}">
-                        <div class="task-title">{t['task_name']}</div>
-                        <span style='font-size:12px; color:#94a3b8;'>👤 {t['assignee']}</span><br>
-                        <span style='font-size:12px; color:#fbbf24;'>⏱️ Hạn: {dl_naive.strftime('%d/%m %H:%M') if dl_naive else '—'}</span>
+                    <div class="hlc-right-part">
+                        <span>⏱️ {time_str}</span>
+                        <span style="color: #38bdf8;">👤 {assignee_str}</span>
                     </div>
-                    """, unsafe_allow_html=True)
-                    
-                    col_btn1, col_btn2 = st.columns(2)
-                    with col_btn1:
-                        if st.button("✏️ CHECKLIST", key=f"dg_ed_{t['id']}", use_container_width=True):
-                            st.session_state.editing_task_id = t['id']
-                            st.rerun()
-                    with col_btn2:
-                        if st.button("XONG ✅", key=f"dg_mv_{t['id']}", use_container_width=True):
-                            run_query("UPDATE team_tasks SET status='Done' WHERE id=%s", (t['id'],), commit=True)
-                            st.rerun()
-
-            with col_done:
-                st.markdown("<h5 style='color: #10b981; text-align:center;'>✅ HOÀN THÀNH</h5>", unsafe_allow_html=True)
-                for t in [x for x in filtered_scope_tasks if x['status'] == 'Done' or x['is_closed']]:
-                    st.markdown(f"""
-                    <div class="task-card task-done">
-                        <div class="task-title" style="text-decoration: line-through; color: #a1a1aa;">{t['task_name']}</div>
-                        <span style='font-size:12px; color:#a1a1aa;'>👤 Phụ trách: {t['assignee']}</span>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    if st.button("XEM LẠI", key=f"dn_ed_{t['id']}", use_container_width=True):
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Nút nhấn nhỏ gọn mờ để kích hoạt Pop-up chỉnh sửa chi tiết / Checklist
+                col_space, col_action_click = st.columns([8, 2])
+                with col_action_click:
+                    if st.button("👁️ MỞ CHI TIẾT / SỬA", key=f"click_act_{target_day}_{t['id']}", use_container_width=True):
                         st.session_state.editing_task_id = t['id']
                         st.rerun()
-        else:
-            # CHẾ ĐỘ XEM LIST VIEW HÀNG NGANG GỌN GÀNG
-            for t in filtered_scope_tasks:
-                with st.container(border=True):
-                    col_l_status, col_l_name, col_l_user, col_l_dl, col_l_action = st.columns([1, 4, 2, 2, 2])
-                    with col_l_status:
-                        if t['is_closed']: st.markdown("🔴 `CLOSED`")
-                        elif t['status'] == 'Done': st.markdown("🟢 `DONE`")
-                        elif t['status'] == 'Doing': st.markdown("🟡 `DOING`")
-                        else: st.markdown("⚪ `TO-DO`")
-                    with col_l_name: st.markdown(f"**{t['task_name']}**")
-                    with col_l_user: st.caption(f"👤 {t['assignee']}")
-                    with col_l_dl: st.caption(f"⏱️ {strip_tz(t['deadline_date']).strftime('%d/%m %H:%M') if t['deadline_date'] else '—'}")
-                    with col_l_action:
-                        if st.button("MỞ XEM CHI TIẾT", key=f"lst_ed_{t['id']}", use_container_width=True):
-                            st.session_state.editing_task_id = t['id']
-                            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
-# ====================================================================
-# QUẢN LÝ NHÂN SỰ FRAME (NẾU ĐƯỢC CHỌN)
-# ====================================================================
-if st.session_state.current_page == "HR":
-    st.divider()
-    st.title("👥 DANH SÁCH TÀI KHOẢN NHÂN SỰ HỆ THỐNG")
-    all_users_raw = run_query("SELECT id, username, role, uid FROM hlc_users ORDER BY id ASC;")
-    if all_users_raw: st.dataframe(pd.DataFrame(all_users_raw), use_container_width=True)
+    if not has_any_task:
+        st.info("☘️ Tuyệt vời! Không có đầu việc nào phát sinh trong khoảng thời gian phân vùng này.")

@@ -7,7 +7,7 @@ import json
 import calendar
 
 # ====================================================================
-# 💾 CẤU HÌNH TRANG & CSS ĐỒNG BỘ 1:1 HÀNG NGANG VÀ CLICK ROW
+# 💾 CẤU HÌNH TRANG VÀ ĐỊNH DẠNG THEME TỐI SÂU
 # ====================================================================
 st.set_page_config(
     page_title="HLC Workstation Team Project Hub",
@@ -16,16 +16,17 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Ép hiệu ứng hover biến dòng task thành một nút bấm (cursor: pointer) giống app gốc
+# Ép cấu hình CSS cho Group Header và bo góc khoảng cách
 st.markdown("""
 <style>
-    /* Khung Group Header theo Ngày giống app gốc */
+    /* Header bọc ngoài của từng Ngày (Màu xanh đen/Xám giống v15) */
     .hlc-date-header {
-        background-color: #1e2538;
+        background-color: #1a2234;
         border: 1px solid #2d3748;
-        padding: 6px 14px;
+        padding: 8px 16px;
         border-radius: 4px;
-        margin-top: 10px;
+        margin-top: 14px;
+        margin-bottom: 6px;
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -33,46 +34,16 @@ st.markdown("""
         font-size: 13px;
         font-weight: bold;
     }
-    .hlc-date-body {
-        background-color: #0b0f19;
-        padding: 2px 0px;
-        margin-bottom: 10px;
-    }
-
-    /* Định dạng dòng Task nằm ngang */
-    .hlc-task-container {
-        margin-bottom: 2px;
-    }
-    .hlc-task-row-btn {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        width: 100%;
-        background-color: #161b26 !important;
-        border: 1px solid #1f2937 !important;
-        padding: 10px 16px !important;
-        border-radius: 4px !important;
-        text-align: left !important;
-        transition: background-color 0.2s;
-    }
-    .hlc-task-row-btn:hover {
-        background-color: #1e2538 !important;
-        border-color: #38bdf8 !important;
-    }
-    
-    .hlc-left-part { display: flex; align-items: center; gap: 8px; font-weight: 600; }
-    .hlc-right-part { display: flex; align-items: center; gap: 20px; font-size: 12px; color: #64748b; }
     
     /* Chấm màu trạng thái */
-    .dot { font-size: 14px; margin-right: 2px; }
+    .dot-indicator { font-size: 14px; margin-right: 6px; }
     .dot-todo { color: #64748b; }
     .dot-doing { color: #f59e0b; }
     .dot-done { color: #10b981; }
     
-    /* Màu chữ tiêu đề công việc phân cấp */
-    .text-todo { color: #f59e0b; } /* Vàng cam nhẹ */
-    .text-doing { color: #f59e0b; }
-    .text-done { color: #4b5563; text-decoration: line-through; }
+    /* Thiết lập màu chữ nội dung hiển thị */
+    .text-normal { color: #eab308; font-weight: 600; }
+    .text-completed { color: #4b5563; text-decoration: line-through; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -130,7 +101,7 @@ def strip_tz(dt):
     return dt
 
 # ====================================================================
-# 🔒 MÀN HÌNH XÁC THỰC
+# 🔒 XÁC THỰC TÀI KHOẢN
 # ====================================================================
 if not st.session_state.authenticated:
     st.markdown("<br><br><h2 style='text-align: center; color: #38bdf8;'>🔒 HLC SYSTEM CLOUD AUTHENTICATION</h2>", unsafe_allow_html=True)
@@ -158,7 +129,7 @@ assignable_users = all_usernames if st.session_state.role == "Admin" else [un fo
 all_tasks = run_query("SELECT * FROM team_tasks ORDER BY is_closed ASC, deadline_date ASC;") or []
 
 # ====================================================================
-# ✏️ POP-UP CHỈNH SỬA CHI TIẾT ĐẦU VIỆC CHUYÊN SÂU (BẤM VÀO LÀ HIỆN)
+# ✏️ POP-UP CHỈNH SỬA CHI TIẾT ĐẦU VIỆC CHUYÊN SÂU
 # ====================================================================
 if st.session_state.editing_task_id is not None:
     task = run_query("SELECT * FROM team_tasks WHERE id = %s;", (st.session_state.editing_task_id,), fetch="one")
@@ -223,7 +194,7 @@ if st.session_state.editing_task_id is not None:
     st.stop()
 
 # ====================================================================
-# BANNER ĐẦU TRANG & SEARCH BAR BỘ LỌC
+# BANNER ĐẦU TRANG & BỘ LỌC TÌM KIẾM
 # ====================================================================
 col_hub, col_p2, col_p3 = st.columns([7, 2, 2])
 with col_hub:
@@ -243,7 +214,8 @@ with col_search:
 with col_sort:
     sort_mode = st.selectbox("Sắp xếp", ["Mặc định", "Theo nhân sự"])
 with col_view:
-    view_mode = st.selectbox("Xem theo khoảng thời gian", ["Ngày", "Tuần", "Tháng"])
+    # 🌟 BỎ HOÀN TOÀN XEM THEO NGÀY, MẶC ĐỊNH CHỌN "TUẦN" THEO APP GỐC
+    view_mode = st.selectbox("Xem theo khoảng thời gian", ["Tuần", "Tháng"], index=0)
 
 if st.session_state.search_kw.strip():
     kw = st.session_state.search_kw.lower()
@@ -291,11 +263,9 @@ with col_panel_left:
 with col_panel_right:
     anchor_date = st.session_state.selected_date
     
-    # Xác định các ngày cần quét cấu trúc dữ liệu
+    # Tính toán mốc ngày quét dữ liệu dựa vào Tuần hoặc Tháng
     days_to_render = []
-    if view_mode == "Ngày":
-        days_to_render = [anchor_date]
-    elif view_mode == "Tuần":
+    if view_mode == "Tuần":
         start_week = anchor_date - datetime.timedelta(days=anchor_date.weekday())
         days_to_render = [start_week + datetime.timedelta(days=i) for i in range(7)]
     elif view_mode == "Tháng":
@@ -329,40 +299,35 @@ with col_panel_right:
         </div>
         """, unsafe_allow_html=True)
         
-        # Khung chứa các dòng task con
-        with st.container():
-            for t in day_tasks:
-                # Phân loại chấm màu
-                if t['is_closed']: dot_style = '<span class="dot dot-todo">●</span>'
-                elif t['status'] == 'Done': dot_style = '<span class="dot dot-done">●</span>'
-                elif t['status'] == 'Doing': dot_style = '<span class="dot dot-doing">●</span>'
-                else: dot_style = '<span class="dot dot-todo">●</span>'
-                
-                # Class định dạng màu chữ
-                t_class = "text-done" if (t['is_closed'] or t['status'] == 'Done') else "text-todo"
-                
-                dl_naive = strip_tz(t['deadline_date'])
-                time_str = dl_naive.strftime('%H:%M') if dl_naive else "00:00"
-                assignee_str = t['assignee'] or "chưa gán"
+        # Sử dụng container bao quanh và chia cột native để loại bỏ lỗi vỡ render HTML
+        for t in day_tasks:
+            # Phân loại màu dấu chấm tiến độ
+            if t['is_closed']: dot_style = "⚪"
+            elif t['status'] == 'Done': dot_style = "🟢"
+            elif t['status'] == 'Doing': dot_style = "🟡"
+            else: dot_style = "⚪"
+            
+            # Định dạng màu sắc và trạng thái chữ tiêu đề
+            is_done_or_closed = (t['is_closed'] or t['status'] == 'Done')
+            text_prefix = "~~" if is_done_or_closed else ""
+            text_suffix = "~~" if is_done_or_closed else ""
+            
+            dl_naive = strip_tz(t['deadline_date'])
+            time_str = dl_naive.strftime('%H:%M') if dl_naive else "00:00"
+            assignee_str = t['assignee'] or "chưa gán"
 
-                # Tận dụng cấu trúc Nút Bấm Ẩn của Streamlit lồng HTML để biến toàn bộ dòng thành nút click mở popup
-                button_label_html = f"""
-                <div style="display: flex; justify-content: space-between; width: 100%; align-items: center; background-color: #161b26;">
-                    <div class="hlc-left-part">
-                        {dot_style}
-                        <span class="{t_class}">{t['task_name']}</span>
-                    </div>
-                    <div class="hlc-right-part">
-                        <span>{time_str}</span>
-                        <span style="color: #64748b;">{assignee_str}</span>
-                    </div>
-                </div>
-                """
-                
-                # Nút bấm tàng hình ép giao diện dòng ngang
-                if st.button(button_label_html, key=f"row_t_{target_day}_{t['id']}", use_container_width=True):
-                    st.session_state.editing_task_id = t['id']
-                    st.rerun()
+            # 🛠️ DÙNG EXPANDER / CONTAINER CHỨA NÚT BẤM ĐỘC LẬP (SỬA LỖI TEXT THÔ HTML)
+            with st.container(border=True):
+                col_c1, col_c2, col_c3 = st.columns([7, 2, 2])
+                with col_c1:
+                    st.markdown(f"{dot_style} {text_prefix}**{t['task_name']}**{text_suffix}")
+                with col_c2:
+                    st.caption(f"⏱️ {time_str}")
+                with col_c3:
+                    # Bấm trực tiếp vào nút chỉnh sửa độc lập của từng dòng Task để lên Popup
+                    if st.button("✏️ MỞ CHI TIẾT", key=f"row_click_{target_day}_{t['id']}", use_container_width=True):
+                        st.session_state.editing_task_id = t['id']
+                        st.rerun()
 
     if not has_any_task:
         st.info("☘️ Tuyệt vời! Không có đầu việc nào phát sinh trong khoảng thời gian này.")

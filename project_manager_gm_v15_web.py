@@ -7,7 +7,7 @@ import json
 import calendar
 
 # ====================================================================
-# 💾 CẤU HÌNH TRANG & CSS PHỤC HỒI GIAO DIỆN HÀNG NGANG (APP GỐC V15)
+# 💾 CẤU HÌNH TRANG & CSS ĐỒNG BỘ 1:1 HÀNG NGANG VÀ CLICK ROW
 # ====================================================================
 st.set_page_config(
     page_title="HLC Workstation Team Project Hub",
@@ -16,54 +16,63 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Ép CSS hàng ngang, chấm màu, nhãn thời gian và khung Group Header màu xanh giống hệt ảnh anh chụp
+# Ép hiệu ứng hover biến dòng task thành một nút bấm (cursor: pointer) giống app gốc
 st.markdown("""
 <style>
-    /* Tổng thể Task Row hàng ngang */
-    .hlc-task-row {
+    /* Khung Group Header theo Ngày giống app gốc */
+    .hlc-date-header {
+        background-color: #1e2538;
+        border: 1px solid #2d3748;
+        padding: 6px 14px;
+        border-radius: 4px;
+        margin-top: 10px;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 10px 16px;
-        background-color: #161b26;
-        border-bottom: 1px solid #1f2937;
-        margin-bottom: 4px;
-        border-radius: 4px;
+        color: #94a3b8;
+        font-size: 13px;
+        font-weight: bold;
     }
-    .hlc-left-part { display: flex; align-items: center; gap: 10px; }
-    .hlc-right-part { display: flex; align-items: center; gap: 20px; font-size: 13px; color: #64748b; }
+    .hlc-date-body {
+        background-color: #0b0f19;
+        padding: 2px 0px;
+        margin-bottom: 10px;
+    }
+
+    /* Định dạng dòng Task nằm ngang */
+    .hlc-task-container {
+        margin-bottom: 2px;
+    }
+    .hlc-task-row-btn {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+        background-color: #161b26 !important;
+        border: 1px solid #1f2937 !important;
+        padding: 10px 16px !important;
+        border-radius: 4px !important;
+        text-align: left !important;
+        transition: background-color 0.2s;
+    }
+    .hlc-task-row-btn:hover {
+        background-color: #1e2538 !important;
+        border-color: #38bdf8 !important;
+    }
+    
+    .hlc-left-part { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+    .hlc-right-part { display: flex; align-items: center; gap: 20px; font-size: 12px; color: #64748b; }
     
     /* Chấm màu trạng thái */
-    .dot { font-size: 16px; margin-right: 4px; }
+    .dot { font-size: 14px; margin-right: 2px; }
     .dot-todo { color: #64748b; }
     .dot-doing { color: #f59e0b; }
     .dot-done { color: #10b981; }
     
-    /* Chữ tiêu đề Task */
-    .task-text-normal { font-weight: 600; color: #eab308; font-size: 14px; } /* Mặc định vàng cam nhẹ giống ảnh */
-    .task-text-done { font-weight: 500; color: #4b5563; text-decoration: line-through; font-size: 14px; }
-    
-    /* Khung Group Header theo Ngày (Màu xanh dương như ảnh gốc) */
-    .hlc-date-header {
-        background-color: #1e3a8a;
-        border: 1px solid #2563eb;
-        padding: 8px 16px;
-        border-radius: 6px 6px 0 0;
-        margin-top: 15px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        color: #38bdf8;
-        font-weight: bold;
-    }
-    .hlc-date-body {
-        border: 1px solid #2563eb;
-        border-top: none;
-        background-color: #0f172a;
-        padding: 6px;
-        border-radius: 0 0 6px 6px;
-        margin-bottom: 15px;
-    }
+    /* Màu chữ tiêu đề công việc phân cấp */
+    .text-todo { color: #f59e0b; } /* Vàng cam nhẹ */
+    .text-doing { color: #f59e0b; }
+    .text-done { color: #4b5563; text-decoration: line-through; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -121,7 +130,7 @@ def strip_tz(dt):
     return dt
 
 # ====================================================================
-# 🔒 MÀN HÌNH XÁC THỰC LÀM VÀ PHÂN QUYỀN USER LIST
+# 🔒 MÀN HÌNH XÁC THỰC
 # ====================================================================
 if not st.session_state.authenticated:
     st.markdown("<br><br><h2 style='text-align: center; color: #38bdf8;'>🔒 HLC SYSTEM CLOUD AUTHENTICATION</h2>", unsafe_allow_html=True)
@@ -146,16 +155,15 @@ user_uid_map = {u['username']: str(u['uid']) for u in users_db}
 user_role_map = {u['username']: u['role'] for u in users_db}
 assignable_users = all_usernames if st.session_state.role == "Admin" else [un for un in all_usernames if user_role_map.get(un) != "Admin"]
 
-# Pull dữ liệu toàn cục phục vụ kết xuất giao diện
 all_tasks = run_query("SELECT * FROM team_tasks ORDER BY is_closed ASC, deadline_date ASC;") or []
 
 # ====================================================================
-# ✏️ POP-UP CHỈNH SỬA CHI TIẾT ĐẦU VIỆC CHUYÊN SÂU
+# ✏️ POP-UP CHỈNH SỬA CHI TIẾT ĐẦU VIỆC CHUYÊN SÂU (BẤM VÀO LÀ HIỆN)
 # ====================================================================
 if st.session_state.editing_task_id is not None:
     task = run_query("SELECT * FROM team_tasks WHERE id = %s;", (st.session_state.editing_task_id,), fetch="one")
     if task:
-        st.markdown(f"### ✏️ Sửa Đầu Việc: `{task['task_name']}`")
+        st.markdown(f"### ✏️ Chi Tiết & Chỉnh Sửa Đầu Việc: `{task['task_name']}`")
         is_owner = st.session_state.role == "Admin" or st.session_state.username.lower() in [task['created_by'].lower(), task['assignee'].lower()]
         sub_tasks = safe_json_load(task['sub_tasks'])
         tagged_users = safe_json_load(task['tagged_users'])
@@ -237,7 +245,6 @@ with col_sort:
 with col_view:
     view_mode = st.selectbox("Xem theo khoảng thời gian", ["Ngày", "Tuần", "Tháng"])
 
-# Logic Lọc Tìm Kiếm Kịp Thời
 if st.session_state.search_kw.strip():
     kw = st.session_state.search_kw.lower()
     all_tasks = [t for t in all_tasks if kw in str(t['task_name']).lower() or kw in str(t['assignee']).lower()]
@@ -280,11 +287,11 @@ with col_panel_left:
             st.toast("🚀 Đã đẩy tác vụ mới thành công!", icon="🎉")
             st.rerun()
 
-# --- 2️⃣ BÊN PHẢI: HIỂN THỊ DANH SÁCH DÒNG NGANG THEO ĐÚNG MẪU ẢNH ---
+# --- 2️⃣ BÊN PHẢI: HIỂN THỊ DANH SÁCH THEO ĐÚNG ĐỊNH DẠNG HÀNG NGANG CLICABLE ---
 with col_panel_right:
     anchor_date = st.session_state.selected_date
     
-    # Xác định danh sách các ngày cần hiển thị dựa theo chế độ xem (Ngày / Tuần / Tháng)
+    # Xác định các ngày cần quét cấu trúc dữ liệu
     days_to_render = []
     if view_mode == "Ngày":
         days_to_render = [anchor_date]
@@ -293,11 +300,10 @@ with col_panel_right:
         days_to_render = [start_week + datetime.timedelta(days=i) for i in range(7)]
     elif view_mode == "Tháng":
         _, last_day = calendar.monthrange(anchor_date.year, anchor_date.month)
-        days_to_render = [datetime.date(anchor_date.year, anchor_date.month, day_num) for day_num in range(1, last_day + 1)]
+        days_to_render = [datetime.date(anchor_date.year, anchor_date.month, d) for d in range(1, last_day + 1)]
 
-    st.markdown(f"#### ⏱️ DANH SÁCH CÔNG VIỆC — CHẾ ĐỘ XEM THEO THỜI GIAN")
+    st.markdown(f"#### ⏱️ DANH SÁCH CÔNG VIỆC — HỆ THỐNG DÒNG THỜI GIAN")
 
-    # Hàm kiểm tra task có active trúng ngày đó không
     def is_task_active_on_day(t, d):
         try:
             st_d = t['start_date'] if isinstance(t['start_date'], datetime.date) else t['created_at'].date()
@@ -305,8 +311,8 @@ with col_panel_right:
             return st_d <= d <= dl_d
         except: return False
 
-    # Vẽ vòng lặp qua từng ngày (Date Group Headers màu xanh) giống ảnh thiết kế gốc
     has_any_task = False
+    
     for target_day in days_to_render:
         day_tasks = [t for t in all_tasks if is_task_active_on_day(t, target_day)]
         if not day_tasks:
@@ -315,52 +321,57 @@ with col_panel_right:
         has_any_task = True
         day_str = target_day.strftime('%A %d/%m/%Y').replace("Monday","Thứ 2").replace("Tuesday","Thứ 3").replace("Wednesday","Thứ 4").replace("Thursday","Thứ 5").replace("Friday","Thứ 6").replace("Saturday","Thứ 7").replace("Sunday","Chủ Nhật")
         
-        # Tạo Group Header màu xanh dương xịn mịn kèm badge đếm số lượng task ở góc phải
+        # Tiêu đề nhóm Ngày màu tối sâu xịn mịn như app gốc
         st.markdown(f"""
         <div class="hlc-date-header">
             <span>⭐ {day_str.upper()}</span>
-            <span style="font-size: 12px; background: #0b0f19; padding: 2px 8px; border-radius: 10px;">{len(day_tasks)} TASK</span>
+            <span>{len(day_tasks)} TASK</span>
         </div>
         """, unsafe_allow_html=True)
         
-        # Render các Task Row hàng ngang nằm bên trong khung border xanh
-        with st.markdown('<div class="hlc-date-body">', unsafe_allow_html=True):
+        # Khung chứa các dòng task con
+        with st.container():
             for t in day_tasks:
-                # Phân định dấu chấm trạng thái màu sắc
-                if t['is_closed']: dot_html = '<span class="dot dot-todo">●</span>'
-                elif t['status'] == 'Done': dot_html = '<span class="dot dot-done">●</span>'
-                elif t['status'] == 'Doing': dot_html = '<span class="dot dot-doing">●</span>'
-                else: dot_html = '<span class="dot dot-todo">●</span>'
+                # Phân loại chấm màu
+                if t['is_closed']: dot_style = '<span class="dot dot-todo">●</span>'
+                elif t['status'] == 'Done': dot_style = '<span class="dot dot-done">●</span>'
+                elif t['status'] == 'Doing': dot_style = '<span class="dot dot-doing">●</span>'
+                else: dot_style = '<span class="dot dot-todo">●</span>'
                 
-                # Kiểu chữ
-                text_class = "task-text-done" if (t['is_closed'] or t['status'] == 'Done') else "task-text-normal"
+                # Class định dạng màu chữ
+                t_class = "text-done" if (t['is_closed'] or t['status'] == 'Done') else "text-todo"
                 
-                # Chuỗi hiển thị deadline giờ giấc
                 dl_naive = strip_tz(t['deadline_date'])
                 time_str = dl_naive.strftime('%H:%M') if dl_naive else "00:00"
                 assignee_str = t['assignee'] or "chưa gán"
-                
-                # Xuất luồng HTML trọn gói cho 1 dòng việc nằm ngang
-                st.markdown(f"""
-                <div class="hlc-task-row">
+
+                # Tận dụng cấu trúc Nút Bấm Ẩn của Streamlit lồng HTML để biến toàn bộ dòng thành nút click mở popup
+                button_label_html = f"""
+                <div style="display: flex; justify-content: space-between; width: 100%; align-items: center; background-color: #161b26;">
                     <div class="hlc-left-part">
-                        {dot_html}
-                        <span class="{text_class}">{t['task_name']}</span>
+                        {dot_style}
+                        <span class="{t_class}">{t['task_name']}</span>
                     </div>
                     <div class="hlc-right-part">
-                        <span>⏱️ {time_str}</span>
-                        <span style="color: #38bdf8;">👤 {assignee_str}</span>
+                        <span>{time_str}</span>
+                        <span style="color: #64748b;">{assignee_str}</span>
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
+                """
                 
-                # Nút nhấn nhỏ gọn mờ để kích hoạt Pop-up chỉnh sửa chi tiết / Checklist
-                col_space, col_action_click = st.columns([8, 2])
-                with col_action_click:
-                    if st.button("👁️ MỞ CHI TIẾT / SỬA", key=f"click_act_{target_day}_{t['id']}", use_container_width=True):
-                        st.session_state.editing_task_id = t['id']
-                        st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+                # Nút bấm tàng hình ép giao diện dòng ngang
+                if st.button(button_label_html, key=f"row_t_{target_day}_{t['id']}", use_container_width=True):
+                    st.session_state.editing_task_id = t['id']
+                    st.rerun()
 
     if not has_any_task:
-        st.info("☘️ Tuyệt vời! Không có đầu việc nào phát sinh trong khoảng thời gian phân vùng này.")
+        st.info("☘️ Tuyệt vời! Không có đầu việc nào phát sinh trong khoảng thời gian này.")
+
+# ====================================================================
+# QUẢN LÝ NHÂN SỰ FRAME
+# ====================================================================
+if st.session_state.current_page == "HR":
+    st.divider()
+    st.title("👥 DANH SÁCH TÀI KHOẢN NHÂN SỰ HỆ THỐNG")
+    all_users_raw = run_query("SELECT id, username, role, uid FROM hlc_users ORDER BY id ASC;")
+    if all_users_raw: st.dataframe(pd.DataFrame(all_users_raw), use_container_width=True)
